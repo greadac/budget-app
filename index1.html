@@ -473,7 +473,8 @@ let S = {
   budgets:  JSON.parse(localStorage.getItem('gb_bud')  || '{}'),
   cats:     JSON.parse(localStorage.getItem('gb_cats') || 'null') || DEFAULT_CATS.slice(),
   payments: JSON.parse(localStorage.getItem('gb_pay')  || '[]'),
-  features: JSON.parse(localStorage.getItem('gb_feat') || 'null') || { loan: true, creditCard: true },
+  features: JSON.parse(localStorage.getItem('gb_feat') || 'null') || { loan: true, creditCard: true, fixed: false },
+  fixedExps: JSON.parse(localStorage.getItem('gb_fixed') || '[]'),
   expType: 'check',
   incType: 'salary'
 };
@@ -492,13 +493,14 @@ const curInc = () => S.incomes.filter(i => i.month === curKey());
 const sum = list => list.reduce((s,e) => s + Number(e.amount), 0);
 
 function save() {
-  localStorage.setItem('gb_exp',  JSON.stringify(S.expenses));
-  localStorage.setItem('gb_inc',  JSON.stringify(S.incomes));
-  localStorage.setItem('gb_loan', JSON.stringify(S.loans));
-  localStorage.setItem('gb_bud',  JSON.stringify(S.budgets));
-  localStorage.setItem('gb_cats', JSON.stringify(S.cats));
-  localStorage.setItem('gb_pay',  JSON.stringify(S.payments));
-  localStorage.setItem('gb_feat', JSON.stringify(S.features));
+  localStorage.setItem('gb_exp',   JSON.stringify(S.expenses));
+  localStorage.setItem('gb_inc',   JSON.stringify(S.incomes));
+  localStorage.setItem('gb_loan',  JSON.stringify(S.loans));
+  localStorage.setItem('gb_bud',   JSON.stringify(S.budgets));
+  localStorage.setItem('gb_cats',  JSON.stringify(S.cats));
+  localStorage.setItem('gb_pay',   JSON.stringify(S.payments));
+  localStorage.setItem('gb_feat',  JSON.stringify(S.features));
+  localStorage.setItem('gb_fixed', JSON.stringify(S.fixedExps));
 }
 
 function toast(msg) {
@@ -511,7 +513,9 @@ function changeMonth(d) {
   S.m += d;
   if (S.m < 0) { S.m = 11; S.y--; }
   if (S.m > 11) { S.m = 0;  S.y++; }
-  updateLabel(); render();
+  updateLabel();
+  applyFixedExps();
+  render();
 }
 function updateLabel() {
   document.getElementById('current-month-label').textContent =
@@ -567,7 +571,8 @@ function renderHome() {
   const loanAmt   = sum(incs.filter(i => i.incomeType === 'loan'));
   const repay     = S.features.loan ? curLoanRepay() : 0;
   const cardPaid  = S.features.creditCard ? sum(S.payments.filter(p => p.month === curKey() && p.kind === 'card')) : 0;
-  const balance   = totalInc - totalExp - repay - cardPaid;
+  const fixedPaid = S.features.fixed ? sum(S.payments.filter(p => p.month === curKey() && p.kind === 'fixed')) : 0;
+  const balance   = totalInc - totalExp - repay - cardPaid - fixedPaid;
   const budget   = S.budgets[curKey()] || 0;
   const pct      = budget > 0 ? Math.min(100, Math.round(totalExp/budget*100)) : 0;
   const remain   = budget - totalExp;
@@ -607,6 +612,11 @@ function renderHome() {
   return `
     <div class="section">
       <div class="summary-grid">
+        <div class="summary-card full" style="border-left:4px solid #1a1a1a">
+          <div class="label">실질 잔액</div>
+          <div class="amount" style="color:${balance>=0?'var(--income)':'var(--accent)'}">${balance>=0?'+':''}${fmt(balance)}원</div>
+          <div class="sub">수입 − 지출 ${S.features.creditCard?'− 카드출금':''} ${S.features.loan?'− 대출상환':''} ${S.features.fixed?'− 고정지출':''}</div>
+        </div>
         <div class="summary-card" style="border-left:4px solid var(--income)">
           <div class="label">이달 수입</div>
           <div class="amount" style="color:var(--income)">${fmt(totalInc)}원</div>
@@ -629,10 +639,12 @@ function renderHome() {
           <div class="amount" style="color:#7b2d8b">${fmt(cardPaid)}원</div>
           <div class="sub">결제예정 탭에서 확인</div>
         </div>` : ''}
-        <div class="summary-card full" style="border-left:4px solid #1a1a1a">
-          <div class="label">실질 잔액 (수입 − 지출 − 카드출금 − 대출상환)</div>
-          <div class="amount" style="color:${balance>=0?'var(--income)':'var(--accent)'}">${balance>=0?'+':''}${fmt(balance)}원</div>
-        </div>
+        ${S.features.fixed ? `
+        <div class="summary-card" style="border-left:4px solid #f4a261">
+          <div class="label">고정지출 출금확인</div>
+          <div class="amount" style="color:#f4a261">${fmt(fixedPaid)}원</div>
+          <div class="sub">결제예정 탭에서 확인</div>
+        </div>` : ''}
       </div>
     </div>
     <div class="section">
@@ -752,6 +764,50 @@ function renderDue() {
   });
   upcoming.sort((a,b) => a.dueLabel.localeCompare(b.dueLabel));
 
+  // ── 고정지출 섹션 ──
+  const fixedSection = S.features.fixed && S.fixedExps.length > 0 ? (() => {
+    const totalFixed = S.fixedExps.reduce((s,f) => s + f.amount, 0);
+    const paidFixed  = S.fixedExps.reduce((s,f) => {
+      const p = S.payments.find(p => p.fixedId === f.id && p.month === key && p.kind === 'fixed');
+      return s + (p ? p.amount : 0);
+    }, 0);
+    return `
+    <div class="section">
+      <div class="due-sec-title">
+        <span class="due-dot" style="background:#f4a261"></span>
+        고정지출
+        <span style="margin-left:auto;font-size:12px;font-weight:700">
+          ${paidFixed > 0 ? `<span style="color:var(--income)">✓ ${fmt(paidFixed)}원 확인완료</span> / ` : ''}<span style="color:var(--accent)">${fmt(totalFixed)}원</span>
+        </span>
+      </div>
+      <div class="card">
+        ${S.fixedExps.map(f => {
+          const dueLabel = `${key}-${String(f.day).padStart(2,'0')}`;
+          const paid = S.payments.find(p => p.fixedId === f.id && p.month === key && p.kind === 'fixed');
+          return `
+          <div class="list-item" style="${paid ? 'opacity:0.55' : ''}">
+            <div class="item-icon" style="background:#fef3c7">📌</div>
+            <div class="item-info">
+              <div class="item-name">${f.name} ${paid ? '<span class="item-badge badge-paid">✓ 확인완료</span>' : ''}</div>
+              <div class="item-meta">${f.cat} · 매월 ${f.day}일</div>
+            </div>
+            <div class="item-right">
+              <div class="item-amount minus">-${fmt(f.amount)}원</div>
+              ${paid && paid.amount !== f.amount ? `<div class="item-due">실제 ${fmt(paid.amount)}원</div>` : ''}
+            </div>
+            ${paid
+              ? `<div style="display:flex;gap:4px;flex-shrink:0">
+                  <button class="confirm-btn" style="font-size:10px;padding:4px 8px" onclick="editPayment('${paid.id}')">✏️</button>
+                  <button class="confirm-btn confirmed" onclick="cancelPayment('${paid.id}')">취소</button>
+                </div>`
+              : `<button class="confirm-btn" onclick="confirmFixed('${f.id}','${f.name}',${f.amount},'${dueLabel}')">출금확인</button>`
+            }
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  })() : '';
+
   // 대출 상환 섹션 (현재 조회 월에 상환 중인 대출만)
   const activeLoanList = S.loans.filter(l =>
     l.repayType==='monthly' && l.monthly && l.repayDate && l.repayDate.slice(0,7) <= key
@@ -839,10 +895,10 @@ function renderDue() {
       </div>
     </div>` : '';
 
-  if (!loanSection && !creditSection) {
+  if (!loanSection && !creditSection && !fixedSection) {
     return `<div class="card"><div class="empty-state"><div class="emoji">📅</div><p>이번 달 결제 예정 내역이 없어요</p></div></div>`;
   }
-  return (S.features.loan ? loanSection : '') + (S.features.creditCard ? creditSection : '');
+  return (S.features.fixed ? fixedSection : '') + (S.features.loan ? loanSection : '') + (S.features.creditCard ? creditSection : '');
 }
 
 // ─── 예산 탭 ───
@@ -1164,7 +1220,7 @@ function renderSettings() {
       <div class="setting-card">
         <div class="toggle-row">
           <div class="toggle-info">
-            <div class="toggle-label">🏦 학자금 대출 관리</div>
+            <div class="toggle-label">🏦 대출 관리</div>
             <div class="toggle-desc">수입 탭의 대출 기능, 결제예정 상환 항목</div>
           </div>
           <label class="toggle-switch">
@@ -1182,8 +1238,64 @@ function renderSettings() {
             <span class="toggle-slider"></span>
           </label>
         </div>
+        <div class="toggle-row">
+          <div class="toggle-info">
+            <div class="toggle-label">📌 고정지출 관리</div>
+            <div class="toggle-desc">매달 반복되는 지출 등록, 월초 자동 불러오기</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" ${S.features.fixed ? 'checked' : ''} onchange="toggleFeature('fixed', this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
       </div>
     </div>
+
+    ${S.features.fixed ? `
+    <div class="section">
+      <div class="setting-section-title">📌 고정지출 관리</div>
+      <div class="budget-set-card">
+        ${S.fixedExps.length === 0
+          ? `<div style="text-align:center;padding:16px 0;font-size:13px;color:var(--text-muted)">등록된 고정지출이 없어요</div>`
+          : S.fixedExps.map((f,i) => `
+            <div class="cat-manage-item" style="margin-bottom:8px">
+              <div class="cat-dot" style="background:var(--accent)"></div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:600">${f.name}</div>
+                <div style="font-size:11px;color:var(--text-muted)">${f.cat} · 매월 ${f.day}일 · ${fmt(f.amount)}원</div>
+              </div>
+              <button class="cat-del-btn" onclick="delFixedExp(${i})">×</button>
+            </div>`).join('')
+        }
+        <div style="border-top:1px solid var(--border);margin-top:12px;padding-top:12px">
+          <div style="font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:10px">고정지출 추가</div>
+          <div class="form-group">
+            <label class="form-label">항목명</label>
+            <input class="form-input" id="fx-name" placeholder="예) 월세, 넷플릭스, 통신비">
+          </div>
+          <div class="form-group">
+            <label class="form-label">금액 (원)</label>
+            <input class="form-input" id="fx-amount" type="number" inputmode="numeric" placeholder="0">
+          </div>
+          <div style="display:flex;gap:8px" class="form-group">
+            <div style="flex:1">
+              <label class="form-label">카테고리</label>
+              <select class="form-input" id="fx-cat">
+                ${S.cats.map(c=>`<option>${c}</option>`).join('')}
+              </select>
+            </div>
+            <div style="width:90px">
+              <label class="form-label">매월 결제일</label>
+              <input class="form-input" id="fx-day" type="number" inputmode="numeric" placeholder="25" min="1" max="31">
+            </div>
+          </div>
+          <button class="btn-primary" onclick="addFixedExp()">+ 고정지출 추가</button>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:10px">
+            💡 이달 지출내역에 아직 없는 항목은 월초에 자동으로 추가돼요
+          </div>
+        </div>
+      </div>
+    </div>` : ''}
 
     <div class="section">
       <div class="setting-section-title">🏷️ 카테고리 관리</div>
@@ -1284,6 +1396,10 @@ function _openConfirmModal(name, expectedAmount) {
   document.getElementById('confirm-date').value = today();
   document.getElementById('confirm-modal').classList.add('open');
 }
+function confirmFixed(fixedId, name, expectedAmount, dueLabel) {
+  _pendingConfirm = { kind:'fixed', fixedId, name, expectedAmount, month: dueLabel.slice(0,7) };
+  _openConfirmModal(name, expectedAmount);
+}
 function submitConfirm() {
   const amount = Number(document.getElementById('confirm-amount').value);
   const confirmedAt = document.getElementById('confirm-date').value;
@@ -1297,7 +1413,7 @@ function submitConfirm() {
     toast('수정 완료 ✓');
   } else {
     // 신규 확인
-    S.payments.push({ id: Date.now().toString(), kind: p.kind, payKey: p.payKey, loanId: p.loanId, name: p.name, expectedAmount: p.expectedAmount, amount, month: p.month, confirmedAt });
+    S.payments.push({ id: Date.now().toString(), kind: p.kind, payKey: p.payKey, loanId: p.loanId, fixedId: p.fixedId, name: p.name, expectedAmount: p.expectedAmount, amount, month: p.month, confirmedAt });
     const diff = amount - p.expectedAmount;
     if (diff !== 0) toast(`출금확인 완료 ✓ (예정보다 ${diff>0?'+':''}${fmt(diff)}원)`);
     else toast('출금확인 완료 ✓');
@@ -1310,15 +1426,38 @@ function cancelPayment(id) {
   save(); toast('출금확인을 취소했어요'); render();
 }
 
+// ─── 고정지출 관리 ───
+function addFixedExp() {
+  const name   = document.getElementById('fx-name').value.trim();
+  const amount = document.getElementById('fx-amount').value;
+  const cat    = document.getElementById('fx-cat').value;
+  const day    = document.getElementById('fx-day').value;
+  if (!name || !amount || !day) { toast('항목명, 금액, 결제일을 입력해주세요'); return; }
+  if (day < 1 || day > 31) { toast('결제일은 1~31 사이로 입력해주세요'); return; }
+  S.fixedExps.push({ id: Date.now().toString(), name, amount: Number(amount), cat, day: Number(day) });
+  save();
+  ['fx-name','fx-amount','fx-day'].forEach(id => document.getElementById(id).value = '');
+  toast(`'${name}' 고정지출 등록 완료 ✓`); render();
+}
+
+function delFixedExp(i) {
+  const name = S.fixedExps[i].name;
+  S.fixedExps.splice(i, 1);
+  save(); toast(`'${name}' 삭제했어요`); render();
+}
+
+// 고정지출은 결제예정 탭에서 출금확인으로 처리 (자동추가 없음)
+function applyFixedExps() { /* 결제예정 탭에서 처리 */ }
+
 // ─── 기능 토글 ───
 function toggleFeature(key, val) {
   S.features[key] = val;
   save();
-  // 수입 모달 유형 탭 업데이트
   if (key === 'loan') {
     const btn = document.getElementById('it-loan');
     if (btn) btn.style.display = val ? '' : 'none';
   }
+  if (key === 'fixed' && val) applyFixedExps();
   render();
 }
 
@@ -1368,7 +1507,8 @@ function openBackup() {
     budgets:  S.budgets,
     cats:     S.cats,
     payments: S.payments,
-    features: S.features
+    features: S.features,
+    fixedExps: S.fixedExps
   };
   const json = JSON.stringify(data, null, 2);
   const blob = new Blob([json], { type: 'application/json' });
@@ -1428,13 +1568,14 @@ function resetFileInput() {
 function doRestore() {
   if (!pendingRestoreData) { toast('파일을 먼저 선택해주세요'); return; }
   const data = pendingRestoreData;
-  S.expenses = data.expenses || [];
-  S.incomes  = data.incomes  || [];
-  S.loans    = data.loans    || [];
-  S.budgets  = data.budgets  || {};
-  S.cats     = data.cats     || DEFAULT_CATS.slice();
-  S.payments = data.payments || [];
-  S.features = data.features || { loan: true, creditCard: true };
+  S.expenses  = data.expenses  || [];
+  S.incomes   = data.incomes   || [];
+  S.loans     = data.loans     || [];
+  S.budgets   = data.budgets   || {};
+  S.cats      = data.cats      || DEFAULT_CATS.slice();
+  S.payments  = data.payments  || [];
+  S.features  = data.features  || { loan: true, creditCard: true, fixed: false };
+  S.fixedExps = data.fixedExps || [];
   save();
   resetFileInput();
   closeM('restore-modal');
@@ -1446,7 +1587,8 @@ function doRestore() {
 function doReset() {
   S.expenses = []; S.incomes = []; S.loans = []; S.budgets = {};
   S.cats = DEFAULT_CATS.slice(); S.payments = [];
-  S.features = { loan: true, creditCard: true };
+  S.features = { loan: true, creditCard: true, fixed: false };
+  S.fixedExps = [];
   save();
   closeM('reset-modal');
   toast('전체 데이터가 초기화되었어요');
@@ -1465,6 +1607,7 @@ function saveNextBudget() {
 }
 
 updateLabel();
+applyFixedExps();
 render();
 </script>
 </body>
