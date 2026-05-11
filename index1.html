@@ -720,10 +720,13 @@ function renderHome() {
   const pct      = budget > 0 ? Math.min(100, Math.round(totalExp/budget*100)) : 0;
   const remain   = budget - totalExp;
 
-  // 카테고리
+  // 카테고리별 집계 (결제일 기준, 할부는 회차 금액)
   const bycat = {};
   S.cats.forEach(c => bycat[c] = 0);
-  exps.forEach(e => { bycat[e.cat] = (bycat[e.cat]||0) + Number(e.amount); });
+  exps.forEach(e => {
+    const amt = e.type === 'install' ? Math.round(e.amount / e.months) : Number(e.amount);
+    bycat[e.cat] = (bycat[e.cat] || 0) + amt;
+  });
   const sorted = Object.entries(bycat).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
   const catHtml = sorted.length === 0
     ? `<div class="empty-state"><div class="emoji">📊</div><p>지출 내역이 없어요</p></div>`
