@@ -234,6 +234,29 @@
   .cat-add-btn { padding: 10px 16px; background: var(--primary); color: white; border: none; border-radius: 10px; font-family: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
   .cat-save-btn { width: 100%; padding: 12px; background: var(--surface2); color: var(--primary); border: 1.5px solid var(--primary); border-radius: var(--radius); font-family: inherit; font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 4px; }
   .cat-save-btn:active { background: var(--income-light); }
+
+  /* 토글 스위치 */
+  .toggle-row { display: flex; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+  .toggle-row:last-child { border-bottom: none; }
+  .toggle-info { flex: 1; }
+  .toggle-label { font-size: 14px; font-weight: 600; }
+  .toggle-desc { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .toggle-switch { position: relative; width: 46px; height: 26px; flex-shrink: 0; }
+  .toggle-switch input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider {
+    position: absolute; inset: 0;
+    background: var(--border); border-radius: 99px; cursor: pointer;
+    transition: background 0.2s;
+  }
+  .toggle-slider:before {
+    content: ''; position: absolute;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: white; left: 3px; top: 3px;
+    transition: transform 0.2s;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  }
+  .toggle-switch input:checked + .toggle-slider { background: var(--primary); }
+  .toggle-switch input:checked + .toggle-slider:before { transform: translateX(20px); }
 </style>
 </head>
 <body>
@@ -295,8 +318,8 @@
       <label class="form-label">결제 유형</label>
       <div class="type-tabs">
         <button class="type-tab sel-check" id="t-check" onclick="selType('check')">💳 체크카드</button>
-        <button class="type-tab" id="t-credit" onclick="selType('credit')">💜 신용(일시불)</button>
-        <button class="type-tab" id="t-install" onclick="selType('install')">📅 신용(할부)</button>
+        <button class="type-tab" id="t-credit" onclick="selType('credit')" style="${S.features && !S.features.creditCard ? 'display:none' : ''}">💜 신용(일시불)</button>
+        <button class="type-tab" id="t-install" onclick="selType('install')" style="${S.features && !S.features.creditCard ? 'display:none' : ''}">📅 신용(할부)</button>
       </div>
     </div>
     <div class="sub-form" id="sf-credit">
@@ -332,7 +355,7 @@
       <div class="type-tabs">
         <button class="type-tab sel-salary" id="it-salary" onclick="selIncome('salary')">💼 급여</button>
         <button class="type-tab" id="it-other" onclick="selIncome('other')">💵 기타소득</button>
-        <button class="type-tab" id="it-loan" onclick="selIncome('loan')">🏦 학자금대출</button>
+        <button class="type-tab" id="it-loan" onclick="selIncome('loan')" style="${S.features && !S.features.loan ? 'display:none' : ''}">🏦 학자금대출</button>
       </div>
     </div>
     <div class="form-group">
@@ -449,7 +472,8 @@ let S = {
   loans:    JSON.parse(localStorage.getItem('gb_loan') || '[]'),
   budgets:  JSON.parse(localStorage.getItem('gb_bud')  || '{}'),
   cats:     JSON.parse(localStorage.getItem('gb_cats') || 'null') || DEFAULT_CATS.slice(),
-  payments: JSON.parse(localStorage.getItem('gb_pay')  || '[]'), // 출금확인된 항목
+  payments: JSON.parse(localStorage.getItem('gb_pay')  || '[]'),
+  features: JSON.parse(localStorage.getItem('gb_feat') || 'null') || { loan: true, creditCard: true },
   expType: 'check',
   incType: 'salary'
 };
@@ -457,7 +481,11 @@ let S = {
 const COLORS = ['#2d6a4f','#457b9d','#c77dff','#e76f51','#f4a261','#2a9d8f','#e9c46a','#264653'];
 const fmt = n => Number(n).toLocaleString('ko-KR');
 const mkey = (y,m) => `${y}-${String(m+1).padStart(2,'0')}`;
-const today = () => new Date().toISOString().slice(0,10);
+const today = () => {
+  const d = new Date();
+  const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  return kst.toISOString().slice(0, 10);
+};
 const curKey = () => mkey(S.y, S.m);
 const curExp = () => S.expenses.filter(e => e.month === curKey());
 const curInc = () => S.incomes.filter(i => i.month === curKey());
@@ -470,6 +498,7 @@ function save() {
   localStorage.setItem('gb_bud',  JSON.stringify(S.budgets));
   localStorage.setItem('gb_cats', JSON.stringify(S.cats));
   localStorage.setItem('gb_pay',  JSON.stringify(S.payments));
+  localStorage.setItem('gb_feat', JSON.stringify(S.features));
 }
 
 function toast(msg) {
@@ -510,7 +539,19 @@ function curLoanRepay() {
   return S.payments.filter(p => p.month === key && p.kind === 'loan').reduce((s,p) => s + Number(p.amount), 0);
 }
 
-// ─── 렌더 ───
+// ─── 대출별 현재 잔액 계산 (조회 월 기준 누적 상환 차감) ───
+function loanBalance(loan) {
+  // 현재 조회 월까지 출금확인된 상환액 합계
+  const totalRepaid = S.payments
+    .filter(p => p.kind === 'loan' && p.loanId === loan.id && p.month <= curKey())
+    .reduce((s, p) => s + Number(p.amount), 0);
+  return Math.max(0, Number(loan.amount) - totalRepaid);
+}
+
+// ─── 전체 대출 잔액 합계 ───
+function totalLoanBalance() {
+  return S.loans.reduce((s, l) => s + loanBalance(l), 0);
+}
 function render() {
   const el = document.getElementById('main-content');
   const map = { home: renderHome, income: renderIncome, list: renderList, due: renderDue, budget: renderBudget, settings: renderSettings };
@@ -524,8 +565,8 @@ function renderHome() {
   const totalExp  = sum(exps);
   const totalInc  = sum(incs.filter(i => i.incomeType !== 'loan'));
   const loanAmt   = sum(incs.filter(i => i.incomeType === 'loan'));
-  const repay     = curLoanRepay(); // 출금확인된 대출상환
-  const cardPaid  = sum(S.payments.filter(p => p.month === curKey() && p.kind === 'card')); // 출금확인된 카드값
+  const repay     = S.features.loan ? curLoanRepay() : 0;
+  const cardPaid  = S.features.creditCard ? sum(S.payments.filter(p => p.month === curKey() && p.kind === 'card')) : 0;
   const balance   = totalInc - totalExp - repay - cardPaid;
   const budget   = S.budgets[curKey()] || 0;
   const pct      = budget > 0 ? Math.min(100, Math.round(totalExp/budget*100)) : 0;
@@ -576,16 +617,18 @@ function renderHome() {
           <div class="amount" style="color:var(--accent)">${fmt(totalExp)}원</div>
           ${budgetSection}
         </div>
+        ${S.features.loan ? `
         <div class="summary-card" style="border-left:4px solid var(--loan)">
           <div class="label">이달 대출 상환 (출금확인)</div>
           <div class="amount" style="color:var(--loan)">${fmt(repay)}원</div>
-          <div class="sub">총 대출잔액 ${fmt(S.loans.reduce((s,l)=>s+Number(l.amount),0))}원</div>
-        </div>
+          <div class="sub">남은 대출잔액 ${fmt(totalLoanBalance())}원</div>
+        </div>` : ''}
+        ${S.features.creditCard ? `
         <div class="summary-card" style="border-left:4px solid #7b2d8b">
           <div class="label">카드값 출금확인</div>
           <div class="amount" style="color:#7b2d8b">${fmt(cardPaid)}원</div>
           <div class="sub">결제예정 탭에서 확인</div>
-        </div>
+        </div>` : ''}
         <div class="summary-card full" style="border-left:4px solid #1a1a1a">
           <div class="label">실질 잔액 (수입 − 지출 − 카드출금 − 대출상환)</div>
           <div class="amount" style="color:${balance>=0?'var(--income)':'var(--accent)'}">${balance>=0?'+':''}${fmt(balance)}원</div>
@@ -620,21 +663,30 @@ function renderIncome() {
   const loanCards = S.loans.length === 0 ? '' : `
     <div class="section">
       <div class="section-title">🏦 학자금 대출 현황</div>
-      ${S.loans.map(l => `
+      ${S.loans.map(l => {
+        const balance = loanBalance(l);
+        const totalRepaid = Number(l.amount) - balance;
+        const pct = Number(l.amount) > 0 ? Math.round(totalRepaid / Number(l.amount) * 100) : 0;
+        return `
         <div class="loan-card">
           <div class="loan-card-row">
             <span style="font-size:14px;font-weight:700;color:var(--loan)">${l.name}</span>
-            <span style="font-size:15px;font-weight:700;color:var(--loan)">${fmt(l.amount)}원</span>
+            <span style="font-size:15px;font-weight:700;color:var(--loan)">잔액 ${fmt(balance)}원</span>
           </div>
           <div class="loan-card-row">
-            <span style="font-size:11px;color:var(--text-muted)">
-              ${l.repayType==='monthly' ? `월 ${fmt(l.monthly)}원 상환` : '일시상환'}
-              ${l.repayDate ? ` · 첫 상환일 ${l.repayDate}` : ''}
-            </span>
+            <span style="font-size:11px;color:var(--text-muted)">원금 ${fmt(l.amount)}원 · 상환 ${fmt(totalRepaid)}원 (${pct}%)</span>
             <button onclick="delLoan('${l.id}')" style="font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer;font-family:inherit;font-weight:600">삭제</button>
           </div>
+          <div class="cat-bar-bg" style="margin-top:8px">
+            <div class="cat-bar-fill" style="width:${pct}%;background:var(--income)"></div>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
+            ${l.repayType==='monthly' ? `월 ${fmt(l.monthly)}원 상환` : '일시상환'}
+            ${l.repayDate ? ` · 첫 상환일 ${l.repayDate}` : ''}
+          </div>
           ${l.memo ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">📝 ${l.memo}</div>` : ''}
-        </div>`).join('')}
+        </div>`;
+      }).join('')}
     </div>`;
 
   const totalInc = sum(incs.filter(i=>i.incomeType!=='loan'));
@@ -657,8 +709,8 @@ function renderIncome() {
     </div>
     ${sec('💼 급여', salary, '급여를 추가해보세요')}
     ${sec('💵 기타소득', other, '기타소득을 추가해보세요')}
-    ${sec('🏦 이달 대출 수령', loans, '이달 대출 수령 내역이 없어요')}
-    ${loanCards}`;
+    ${S.features.loan ? sec('🏦 이달 대출 수령', loans, '이달 대출 수령 내역이 없어요') : ''}
+    ${S.features.loan ? loanCards : ''}`;
 }
 
 // ─── 지출내역 탭 ───
@@ -790,7 +842,7 @@ function renderDue() {
   if (!loanSection && !creditSection) {
     return `<div class="card"><div class="empty-state"><div class="emoji">📅</div><p>이번 달 결제 예정 내역이 없어요</p></div></div>`;
   }
-  return loanSection + creditSection;
+  return (S.features.loan ? loanSection : '') + (S.features.creditCard ? creditSection : '');
 }
 
 // ─── 예산 탭 ───
@@ -1108,6 +1160,32 @@ function renderSettings() {
     </div>
 
     <div class="section">
+      <div class="setting-section-title">⚙️ 기능 설정</div>
+      <div class="setting-card">
+        <div class="toggle-row">
+          <div class="toggle-info">
+            <div class="toggle-label">🏦 학자금 대출 관리</div>
+            <div class="toggle-desc">수입 탭의 대출 기능, 결제예정 상환 항목</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" ${S.features.loan ? 'checked' : ''} onchange="toggleFeature('loan', this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <div class="toggle-info">
+            <div class="toggle-label">💳 신용카드 결제 관리</div>
+            <div class="toggle-desc">신용(일시불/할부) 결제 유형, 결제예정 카드 항목</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" ${S.features.creditCard ? 'checked' : ''} onchange="toggleFeature('creditCard', this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
       <div class="setting-section-title">🏷️ 카테고리 관리</div>
       <div class="budget-set-card">
         <div class="cat-manage-list" id="cat-manage-list">
@@ -1232,6 +1310,18 @@ function cancelPayment(id) {
   save(); toast('출금확인을 취소했어요'); render();
 }
 
+// ─── 기능 토글 ───
+function toggleFeature(key, val) {
+  S.features[key] = val;
+  save();
+  // 수입 모달 유형 탭 업데이트
+  if (key === 'loan') {
+    const btn = document.getElementById('it-loan');
+    if (btn) btn.style.display = val ? '' : 'none';
+  }
+  render();
+}
+
 // ─── 카테고리 관리 ───
 function addCat() {
   const input = document.getElementById('cat-new-input');
@@ -1277,7 +1367,8 @@ function openBackup() {
     loans:    S.loans,
     budgets:  S.budgets,
     cats:     S.cats,
-    payments: S.payments
+    payments: S.payments,
+    features: S.features
   };
   const json = JSON.stringify(data, null, 2);
   const blob = new Blob([json], { type: 'application/json' });
@@ -1343,6 +1434,7 @@ function doRestore() {
   S.budgets  = data.budgets  || {};
   S.cats     = data.cats     || DEFAULT_CATS.slice();
   S.payments = data.payments || [];
+  S.features = data.features || { loan: true, creditCard: true };
   save();
   resetFileInput();
   closeM('restore-modal');
@@ -1354,6 +1446,7 @@ function doRestore() {
 function doReset() {
   S.expenses = []; S.incomes = []; S.loans = []; S.budgets = {};
   S.cats = DEFAULT_CATS.slice(); S.payments = [];
+  S.features = { loan: true, creditCard: true };
   save();
   closeM('reset-modal');
   toast('전체 데이터가 초기화되었어요');
