@@ -476,7 +476,7 @@
         <div class="guide-card-title">결제예정 탭</div>
         <div class="guide-card-desc">이달에 빠져나갈 돈을 미리 확인하고 출금확인하는 곳이에요</div>
       </div>
-      <div class="guide-item"><span class="guide-badge" style="background:#fef3c7;color:#92400e">📌 고정지출</span>설정에서 등록한 고정지출이 매달 자동으로 표시돼요. 월세, 통신비 등 매달 나가는 고정 항목을 등록해두세요.</div>
+      <div class="guide-item"><span class="guide-badge" style="background:#fef3c7;color:#92400e">📌 고정지출</span>예산 탭에서 등록한 고정지출이 매달 자동으로 표시돼요. 월세, 통신비 등 매달 나가는 항목을 확인하고 출금확인하세요.</div>
       <div class="guide-item"><span class="guide-badge" style="background:var(--loan-light);color:var(--loan)">🏦 대출 상환</span>등록한 대출의 이달 상환액이 표시돼요. 출금확인하면 홈 실질잔액에서 차감돼요.</div>
       <div class="guide-item"><span class="guide-badge" style="background:var(--credit-light);color:#7b2d8b">💳 신용카드</span>이달 결제 예정인 신용카드 청구액이 표시돼요. 일시불·할부 모두 포함돼요.</div>
       <div class="guide-item"><span class="guide-badge" style="background:var(--income-light);color:var(--income)">출금확인</span>실제로 돈이 빠져나간 걸 확인하는 버튼이에요. 실제 금액이 예정과 다르면 직접 수정할 수 있어요. 확인한 것만 홈 실질잔액에 반영돼요.</div>
@@ -488,11 +488,12 @@
       <div class="guide-card">
         <div class="guide-icon">💰</div>
         <div class="guide-card-title">예산 탭</div>
-        <div class="guide-card-desc">이달 지출 목표를 설정하고 관리해요</div>
+        <div class="guide-card-desc">이달 지출 목표 설정과 고정지출을 관리해요</div>
       </div>
       <div class="guide-item"><span class="guide-badge" style="background:var(--income-light);color:var(--income)">예산 설정</span>이번 달 지출 한도를 입력하면 홈 화면에 진행 바가 표시돼요. 전월 지출 기준으로 추천 금액도 보여줘요.</div>
       <div class="guide-item"><span class="guide-badge" style="background:#dceef7;color:var(--check)">다음 달 예산</span>다음 달 예산을 미리 설정해둘 수 있어요.</div>
       <div class="guide-item"><span class="guide-badge" style="background:var(--surface2);color:var(--text)">월별 현황</span>최근 6개월 지출을 막대 차트로 비교할 수 있어요.</div>
+      <div class="guide-item"><span class="guide-badge" style="background:#fef3c7;color:#92400e">📌 고정지출 관리</span>월세, 통신비, 구독료 등 매달 반복되는 지출을 등록해요. 항목명·금액·카테고리·매월 결제일을 입력하면 돼요. 등록한 항목은 결제예정 탭에서 매달 자동으로 표시돼요.</div>
       <div class="guide-tip">💡 예산의 90% 이상 사용하면 진행 바가 빨간색으로 바뀌어요</div>
     </div>
 
@@ -504,7 +505,6 @@
         <div class="guide-card-desc">기능 켜고 끄기, 카테고리 관리, 백업을 할 수 있어요</div>
       </div>
       <div class="guide-item"><span class="guide-badge" style="background:var(--income-light);color:var(--income)">기능 설정</span>대출 관리·신용카드·고정지출 기능을 사용하지 않으면 꺼두면 화면이 간결해져요.</div>
-      <div class="guide-item"><span class="guide-badge" style="background:#fef3c7;color:#92400e">📌 고정지출</span>매달 반복되는 지출(월세, 통신비 등)을 등록해두면 결제예정 탭에 자동으로 표시돼요.</div>
       <div class="guide-item"><span class="guide-badge" style="background:var(--surface2);color:var(--text)">카테고리 관리</span>지출 카테고리를 추가·수정·삭제할 수 있어요. 이름을 탭하면 바로 수정돼요.</div>
       <div class="guide-item"><span class="guide-badge" style="background:var(--income-light);color:var(--income)">💾 백업</span>데이터를 JSON 파일로 저장해요. 폰을 바꿀 때나 브라우저 초기화 전에 꼭 백업하세요!</div>
       <div class="guide-item"><span class="guide-badge" style="background:#dceef7;color:var(--check)">📂 불러오기</span>백업 파일을 선택하면 모든 데이터가 복원돼요.</div>
@@ -881,50 +881,6 @@ function renderDue() {
   });
   upcoming.sort((a,b) => a.dueLabel.localeCompare(b.dueLabel));
 
-  // ── 고정지출 섹션 ──
-  const fixedSection = S.features.fixed && S.fixedExps.length > 0 ? (() => {
-    const totalFixed = S.fixedExps.reduce((s,f) => s + f.amount, 0);
-    const paidFixed  = S.fixedExps.reduce((s,f) => {
-      const p = S.payments.find(p => p.fixedId === f.id && p.month === key && p.kind === 'fixed');
-      return s + (p ? p.amount : 0);
-    }, 0);
-    return `
-    <div class="section">
-      <div class="due-sec-title">
-        <span class="due-dot" style="background:#f4a261"></span>
-        고정지출
-        <span style="margin-left:auto;font-size:12px;font-weight:700">
-          ${paidFixed > 0 ? `<span style="color:var(--income)">✓ ${fmt(paidFixed)}원 확인완료</span> / ` : ''}<span style="color:var(--accent)">${fmt(totalFixed)}원</span>
-        </span>
-      </div>
-      <div class="card">
-        ${S.fixedExps.map(f => {
-          const dueLabel = `${key}-${String(f.day).padStart(2,'0')}`;
-          const paid = S.payments.find(p => p.fixedId === f.id && p.month === key && p.kind === 'fixed');
-          return `
-          <div class="list-item" style="${paid ? 'opacity:0.55' : ''}">
-            <div class="item-icon" style="background:#fef3c7">📌</div>
-            <div class="item-info">
-              <div class="item-name">${f.name} ${paid ? '<span class="item-badge badge-paid">✓ 확인완료</span>' : ''}</div>
-              <div class="item-meta">${f.cat} · 매월 ${f.day}일</div>
-            </div>
-            <div class="item-right">
-              <div class="item-amount minus">-${fmt(f.amount)}원</div>
-              ${paid && paid.amount !== f.amount ? `<div class="item-due">실제 ${fmt(paid.amount)}원</div>` : ''}
-            </div>
-            ${paid
-              ? `<div style="display:flex;gap:4px;flex-shrink:0">
-                  <button class="confirm-btn" style="font-size:10px;padding:4px 8px" onclick="editPayment('${paid.id}')">✏️</button>
-                  <button class="confirm-btn confirmed" onclick="cancelPayment('${paid.id}')">취소</button>
-                </div>`
-              : `<button class="confirm-btn" onclick="confirmFixed('${f.id}','${f.name}',${f.amount},'${dueLabel}')">출금확인</button>`
-            }
-          </div>`;
-        }).join('')}
-      </div>
-    </div>`;
-  })() : '';
-
   // 대출 상환 섹션 (현재 조회 월에 상환 중인 대출만)
   const activeLoanList = S.loans.filter(l =>
     l.repayType==='monthly' && l.monthly && l.repayDate && l.repayDate.slice(0,7) <= key
@@ -1012,10 +968,10 @@ function renderDue() {
       </div>
     </div>` : '';
 
-  if (!loanSection && !creditSection && !fixedSection) {
+  if (!loanSection && !creditSection) {
     return `<div class="card"><div class="empty-state"><div class="emoji">📅</div><p>이번 달 결제 예정 내역이 없어요</p></div></div>`;
   }
-  return (S.features.fixed ? fixedSection : '') + (S.features.loan ? loanSection : '') + (S.features.creditCard ? creditSection : '');
+  return (S.features.loan ? loanSection : '') + (S.features.creditCard ? creditSection : '');
 }
 
 // ─── 예산 탭 ───
@@ -1079,7 +1035,53 @@ function renderBudget() {
         </div>
         <button class="btn-primary" onclick="saveNextBudget()">다음 달 예산 저장</button>
       </div>
-    </div>`;
+    </div>
+
+    ${S.features.fixed ? `
+    <div class="section">
+      <div class="section-title">📌 고정지출 관리</div>
+      <div class="budget-set-card">
+        ${S.fixedExps.length === 0
+          ? `<div style="text-align:center;padding:16px 0;font-size:13px;color:var(--text-muted)">등록된 고정지출이 없어요</div>`
+          : S.fixedExps.map((f,i) => `
+            <div class="cat-manage-item" style="margin-bottom:8px">
+              <div class="cat-dot" style="background:#f4a261"></div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:600">${f.name}</div>
+                <div style="font-size:11px;color:var(--text-muted)">${f.cat} · 매월 ${f.day}일 · ${fmt(f.amount)}원</div>
+              </div>
+              <button class="cat-del-btn" onclick="delFixedExp(${i})">×</button>
+            </div>`).join('')
+        }
+        <div style="border-top:1px solid var(--border);margin-top:12px;padding-top:12px">
+          <div style="font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:10px">고정지출 추가</div>
+          <div class="form-group">
+            <label class="form-label">항목명</label>
+            <input class="form-input" id="fx-name" placeholder="예) 월세, 넷플릭스, 통신비">
+          </div>
+          <div class="form-group">
+            <label class="form-label">금액 (원)</label>
+            <input class="form-input" id="fx-amount" type="number" inputmode="numeric" placeholder="0">
+          </div>
+          <div style="display:flex;gap:8px" class="form-group">
+            <div style="flex:1">
+              <label class="form-label">카테고리</label>
+              <select class="form-input" id="fx-cat">
+                ${S.cats.map(c=>`<option>${c}</option>`).join('')}
+              </select>
+            </div>
+            <div style="width:90px">
+              <label class="form-label">매월 결제일</label>
+              <input class="form-input" id="fx-day" type="number" inputmode="numeric" placeholder="25" min="1" max="31">
+            </div>
+          </div>
+          <button class="btn-primary" onclick="addFixedExp()">+ 고정지출 추가</button>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:10px">
+            💡 결제예정 탭에서 이달 고정지출을 확인하고 출금확인 할 수 있어요
+          </div>
+        </div>
+      </div>
+    </div>` : ''}`;
 }
 
 // ─── 아이템 HTML ───
@@ -1367,52 +1369,6 @@ function renderSettings() {
         </div>
       </div>
     </div>
-
-    ${S.features.fixed ? `
-    <div class="section">
-      <div class="setting-section-title">📌 고정지출 관리</div>
-      <div class="budget-set-card">
-        ${S.fixedExps.length === 0
-          ? `<div style="text-align:center;padding:16px 0;font-size:13px;color:var(--text-muted)">등록된 고정지출이 없어요</div>`
-          : S.fixedExps.map((f,i) => `
-            <div class="cat-manage-item" style="margin-bottom:8px">
-              <div class="cat-dot" style="background:var(--accent)"></div>
-              <div style="flex:1;min-width:0">
-                <div style="font-size:13px;font-weight:600">${f.name}</div>
-                <div style="font-size:11px;color:var(--text-muted)">${f.cat} · 매월 ${f.day}일 · ${fmt(f.amount)}원</div>
-              </div>
-              <button class="cat-del-btn" onclick="delFixedExp(${i})">×</button>
-            </div>`).join('')
-        }
-        <div style="border-top:1px solid var(--border);margin-top:12px;padding-top:12px">
-          <div style="font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:10px">고정지출 추가</div>
-          <div class="form-group">
-            <label class="form-label">항목명</label>
-            <input class="form-input" id="fx-name" placeholder="예) 월세, 넷플릭스, 통신비">
-          </div>
-          <div class="form-group">
-            <label class="form-label">금액 (원)</label>
-            <input class="form-input" id="fx-amount" type="number" inputmode="numeric" placeholder="0">
-          </div>
-          <div style="display:flex;gap:8px" class="form-group">
-            <div style="flex:1">
-              <label class="form-label">카테고리</label>
-              <select class="form-input" id="fx-cat">
-                ${S.cats.map(c=>`<option>${c}</option>`).join('')}
-              </select>
-            </div>
-            <div style="width:90px">
-              <label class="form-label">매월 결제일</label>
-              <input class="form-input" id="fx-day" type="number" inputmode="numeric" placeholder="25" min="1" max="31">
-            </div>
-          </div>
-          <button class="btn-primary" onclick="addFixedExp()">+ 고정지출 추가</button>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:10px">
-            💡 이달 지출내역에 아직 없는 항목은 월초에 자동으로 추가돼요
-          </div>
-        </div>
-      </div>
-    </div>` : ''}
 
     <div class="section">
       <div class="setting-section-title">🏷️ 카테고리 관리</div>
