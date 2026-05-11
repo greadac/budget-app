@@ -605,7 +605,29 @@ const today = () => {
   return kst.toISOString().slice(0, 10);
 };
 const curKey = () => mkey(S.y, S.m);
-const curExp = () => S.expenses.filter(e => e.month === curKey());
+// ─── 현재 월 지출 (신용카드는 결제일 월 기준) ───
+function curExp() {
+  const key = curKey();
+  return S.expenses.filter(e => {
+    if (e.type === 'check') return e.month === key;
+    if (e.type === 'credit') return e.dueDate && e.dueDate.slice(0,7) === key;
+    if (e.type === 'install') {
+      // 할부는 각 회차 결제일이 현재 월인 것
+      for (let i = 0; i < e.months; i++) {
+        const d = new Date(e.instDue);
+        d.setMonth(d.getMonth() + i);
+        if (d.toISOString().slice(0,7) === key) return true;
+      }
+      return false;
+    }
+    return e.month === key;
+  });
+}
+
+// 지출 탭용: 신용카드도 사용일 기준으로 표시 (내역 확인용)
+function curExpForList() {
+  return S.expenses.filter(e => e.month === curKey());
+}
 const curInc = () => S.incomes.filter(i => i.month === curKey());
 const sum = list => list.reduce((s,e) => s + Number(e.amount), 0);
 
@@ -681,9 +703,13 @@ function render() {
 
 // ─── 홈 ───
 function renderHome() {
-  const exps = curExp();
+  const exps = curExp(); // 결제일 기준 이달 지출
   const incs = curInc();
-  const totalExp  = sum(exps);
+  // 할부는 이번 달 회차 금액만 합산
+  const totalExp  = exps.reduce((s, e) => {
+    if (e.type === 'install') return s + Math.round(e.amount / e.months);
+    return s + Number(e.amount);
+  }, 0);
   const totalInc  = sum(incs.filter(i => i.incomeType !== 'loan'));
   const loanAmt   = sum(incs.filter(i => i.incomeType === 'loan'));
   const repay     = S.features.loan ? curLoanRepay() : 0;
@@ -844,7 +870,7 @@ function renderIncome() {
 
 // ─── 지출내역 탭 ───
 function renderList() {
-  const exps = [...curExp()].sort((a,b) => b.date.localeCompare(a.date));
+  const exps = [...curExpForList()].sort((a,b) => b.date.localeCompare(a.date));
   if (exps.length === 0) return `<div class="card"><div class="empty-state"><div class="emoji">📝</div><p>이번 달 지출 내역이 없어요</p></div></div>`;
   const grp = {};
   exps.forEach(e => { if(!grp[e.date]) grp[e.date]=[]; grp[e.date].push(e); });
@@ -860,10 +886,10 @@ function renderList() {
 
 // ─── 결제예정 탭 ───
 function renderDue() {
-  const key = curKey(); // 현재 조회 월
+  const key = curKey();
   const creditExps = S.expenses.filter(e => e.type==='credit'||e.type==='install');
 
-  // 전체 회차 생성 후 현재 조회 월에 해당하는 것만 필터
+  // 현재 조회 월 결제 예정 카드 항목
   const upcoming = [];
   creditExps.forEach(e => {
     if (e.type==='credit') {
@@ -881,11 +907,54 @@ function renderDue() {
   });
   upcoming.sort((a,b) => a.dueLabel.localeCompare(b.dueLabel));
 
-  // 대출 상환 섹션 (현재 조회 월에 상환 중인 대출만)
+  // ── 고정지출 섹션 ──
+  const fixedSection = S.features.fixed && S.fixedExps.length > 0 ? (() => {
+    const totalFixed = S.fixedExps.reduce((s,f) => s + f.amount, 0);
+    const paidFixed  = S.fixedExps.reduce((s,f) => {
+      const p = S.payments.find(p => p.fixedId === f.id && p.month === key && p.kind === 'fixed');
+      return s + (p ? p.amount : 0);
+    }, 0);
+    return `
+    <div class="section">
+      <div class="due-sec-title">
+        <span class="due-dot" style="background:#f4a261"></span>
+        고정지출
+        <span style="margin-left:auto;font-size:12px;font-weight:700">
+          ${paidFixed > 0 ? `<span style="color:var(--income)">✓ ${fmt(paidFixed)}원 확인완료</span> / ` : ''}<span style="color:var(--accent)">${fmt(totalFixed)}원</span>
+        </span>
+      </div>
+      <div class="card">
+        ${S.fixedExps.map(f => {
+          const dueLabel = `${key}-${String(f.day).padStart(2,'0')}`;
+          const paid = S.payments.find(p => p.fixedId === f.id && p.month === key && p.kind === 'fixed');
+          return `
+          <div class="list-item" style="${paid ? 'opacity:0.55' : ''}">
+            <div class="item-icon" style="background:#fef3c7">📌</div>
+            <div class="item-info">
+              <div class="item-name">${f.name} ${paid ? '<span class="item-badge badge-paid">✓ 확인완료</span>' : ''}</div>
+              <div class="item-meta">${f.cat} · 매월 ${f.day}일</div>
+            </div>
+            <div class="item-right">
+              <div class="item-amount minus">-${fmt(f.amount)}원</div>
+              ${paid && paid.amount !== f.amount ? `<div class="item-due">실제 ${fmt(paid.amount)}원</div>` : ''}
+            </div>
+            ${paid
+              ? `<div style="display:flex;gap:4px;flex-shrink:0">
+                  <button class="confirm-btn" style="font-size:10px;padding:4px 8px" onclick="editPayment('${paid.id}')">✏️ 수정</button>
+                  <button class="confirm-btn confirmed" onclick="cancelPayment('${paid.id}')">취소</button>
+                </div>`
+              : `<button class="confirm-btn" onclick="confirmFixed('${f.id}','${f.name}',${f.amount},'${dueLabel}')">출금확인</button>`
+            }
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  })() : '';
+
+  // ── 대출 상환 섹션 ──
   const activeLoanList = S.loans.filter(l =>
     l.repayType==='monthly' && l.monthly && l.repayDate && l.repayDate.slice(0,7) <= key
   );
-
   const loanSection = activeLoanList.length > 0 ? `
     <div class="section">
       <div class="due-sec-title"><span class="due-dot" style="background:var(--loan)"></span>학자금 대출 월 상환</div>
@@ -919,14 +988,13 @@ function renderDue() {
       </div>
     </div>` : '';
 
-  // 카드 결제 섹션
+  // ── 카드 결제 섹션 ──
   const mTotal = upcoming.reduce((s,i)=>s+Number(i.monthlyAmt),0);
   const paidTotal = upcoming.reduce((s,item) => {
     const payKey = item.type==='install' ? `${item.id}_${item.round}` : item.id;
     const paid = S.payments.find(p => p.payKey===payKey && p.kind==='card');
     return s + (paid ? Number(paid.amount) : 0);
   }, 0);
-
   const creditSection = upcoming.length > 0 ? `
     <div class="section">
       <div class="due-sec-title">
@@ -968,10 +1036,10 @@ function renderDue() {
       </div>
     </div>` : '';
 
-  if (!loanSection && !creditSection) {
+  if (!fixedSection && !loanSection && !creditSection) {
     return `<div class="card"><div class="empty-state"><div class="emoji">📅</div><p>이번 달 결제 예정 내역이 없어요</p></div></div>`;
   }
-  return (S.features.loan ? loanSection : '') + (S.features.creditCard ? creditSection : '');
+  return (S.features.fixed ? fixedSection : '') + (S.features.loan ? loanSection : '') + (S.features.creditCard ? creditSection : '');
 }
 
 // ─── 예산 탭 ───
